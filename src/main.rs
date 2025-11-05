@@ -172,11 +172,17 @@ fn handle_output_stream<R: std::io::Read + Send + 'static>(
         for line in reader.lines() {
             match line {
                 Ok(line) => {
-                    // Trim leading and trailing whitespace
-                    let trimmed = line.trim();
+                    // Flutter uses \r to update lines in place
+                    // Split by \r and take the last segment (what would be visible)
+                    let visible_text = line
+                        .split('\r')
+                        .last()
+                        .unwrap_or("")
+                        .trim();
+
                     // Skip empty lines to reduce clutter
-                    if !trimmed.is_empty() {
-                        println!("{}", trimmed);
+                    if !visible_text.is_empty() {
+                        println!("{}", visible_text);
                     }
                 }
                 Err(_) => break,
