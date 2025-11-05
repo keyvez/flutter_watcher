@@ -172,7 +172,12 @@ fn handle_output_stream<R: std::io::Read + Send + 'static>(
         for line in reader.lines() {
             match line {
                 Ok(line) => {
-                    println!("{}", line);
+                    // Trim leading and trailing whitespace
+                    let trimmed = line.trim();
+                    // Skip empty lines to reduce clutter
+                    if !trimmed.is_empty() {
+                        println!("{}", trimmed);
+                    }
                 }
                 Err(_) => break,
             }
