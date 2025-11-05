@@ -3,7 +3,7 @@ use clap::Parser;
 use crossterm::event::{self, Event as TermEvent, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::channel;
@@ -168,25 +168,42 @@ fn handle_output_stream<R: std::io::Read + Send + 'static>(
     _is_stderr: bool,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        let reader = BufReader::new(stream);
-        for line in reader.lines() {
-            match line {
-                Ok(line) => {
-                    // Flutter uses \r to update lines in place
-                    // Split by \r and take the last segment (what would be visible)
-                    let visible_text = line
-                        .split('\r')
-                        .last()
-                        .unwrap_or("")
-                        .trim();
+        let mut reader = BufReader::new(stream);
+        let mut current_line = String::new();
+        let mut buffer = [0u8; 1];
 
-                    // Skip empty lines to reduce clutter
-                    if !visible_text.is_empty() {
-                        println!("{}", visible_text);
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => break, // EOF
+                Ok(_) => {
+                    let ch = buffer[0] as char;
+                    match ch {
+                        '\r' => {
+                            // Carriage return: clear the current line
+                            current_line.clear();
+                        }
+                        '\n' => {
+                            // Newline: print the current line if not empty
+                            let trimmed = current_line.trim();
+                            if !trimmed.is_empty() {
+                                println!("{}", trimmed);
+                            }
+                            current_line.clear();
+                        }
+                        _ => {
+                            // Regular character: add to current line
+                            current_line.push(ch);
+                        }
                     }
                 }
                 Err(_) => break,
             }
+        }
+
+        // Print any remaining content
+        let trimmed = current_line.trim();
+        if !trimmed.is_empty() {
+            println!("{}", trimmed);
         }
     })
 }
