@@ -1,10 +1,11 @@
 # Flutter Watcher
 
-A Rust-based tool that watches your Flutter project for file changes and automatically triggers hot reload by sending the 'r' key to the Flutter process.
+A Rust-based tool that watches your Flutter project for file changes and automatically triggers hot reload. Features full keyboard passthrough, allowing you to use all Flutter run commands (r, R, h, q, etc.) just like running `flutter run` directly.
 
 ## Features
 
 - 🔥 Automatic hot reload on Dart file changes
+- ⌨️ **Key passthrough**: Send Flutter commands directly (r, R, h, q, etc.)
 - 🚀 Spawns and manages Flutter run process
 - 👀 Recursive file watching
 - ⚡ Debounced reload to prevent excessive reloads
@@ -76,7 +77,33 @@ flutter_watcher --path ./my_app --device chrome -- --dart-define=ENV=dev
 1. **Spawns Flutter Process**: Starts `flutter run` with your specified arguments
 2. **Watches for Changes**: Monitors all `.dart` files in the project directory
 3. **Auto-Reload**: When a file changes, sends 'r' to the Flutter process stdin
-4. **Debouncing**: Waits 500ms between reloads to avoid excessive triggering
+4. **Key Passthrough**: All keyboard input is forwarded to the Flutter process
+5. **Debouncing**: Waits 500ms between reloads to avoid excessive triggering
+
+## Flutter Commands
+
+All Flutter run keyboard commands work seamlessly with flutter_watcher:
+
+- **r** - Hot reload
+- **R** - Hot restart (clears state)
+- **h** - Display help
+- **c** - Clear the screen
+- **q** - Quit
+- **d** - Detach (keep app running)
+- **s** - Take a screenshot
+- **w** - Dump widget hierarchy
+- **t** - Dump rendering tree
+- **L** - Dump layer tree
+- **S** - Dump accessibility tree
+- **p** - Toggle performance overlay
+- **P** - Toggle performance overlay for specific layers
+- **a** - Toggle timeline events for all widget build methods
+- **i** - Toggle widget inspector
+- **o** - Simulate different operating systems
+- **z** - Toggle elevation checker
+- **v** - Open Flutter DevTools
+
+Simply type any of these commands while flutter_watcher is running, just as you would with `flutter run`.
 
 ## Command Line Options
 

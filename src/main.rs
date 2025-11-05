@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
 use clap::Parser;
+use crossterm::event::{self, Event as TermEvent, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::io::Write;
 use std::path::PathBuf;
@@ -60,6 +62,16 @@ impl FlutterProcess {
             stdin.write_all(b"r")?;
             stdin.flush()?;
             println!("🔄 Sent hot reload command");
+            Ok(())
+        } else {
+            anyhow::bail!("Flutter process stdin not available")
+        }
+    }
+
+    fn send_input(&mut self, input: &[u8]) -> Result<()> {
+        if let Some(stdin) = self.child.stdin.as_mut() {
+            stdin.write_all(input)?;
+            stdin.flush()?;
             Ok(())
         } else {
             anyhow::bail!("Flutter process stdin not available")
@@ -151,6 +163,57 @@ fn should_trigger_reload(event: &Event) -> bool {
     })
 }
 
+fn handle_user_input(process: Arc<Mutex<FlutterProcess>>) -> Result<()> {
+    // Enable raw mode to capture key presses
+    enable_raw_mode().context("Failed to enable raw mode")?;
+
+    loop {
+        // Poll for events with a timeout
+        if event::poll(Duration::from_millis(100))? {
+            match event::read()? {
+                TermEvent::Key(KeyEvent {
+                    code,
+                    modifiers,
+                    ..
+                }) => {
+                    // Handle Ctrl+C separately (though ctrlc crate handles it too)
+                    if code == KeyCode::Char('c') && modifiers.contains(KeyModifiers::CONTROL) {
+                        break;
+                    }
+
+                    // Convert key press to bytes and send to Flutter
+                    let input = match code {
+                        KeyCode::Char(c) => vec![c as u8],
+                        KeyCode::Enter => vec![b'\n'],
+                        _ => continue, // Ignore other keys
+                    };
+
+                    let mut proc = process.lock().unwrap();
+                    if !proc.is_running() {
+                        break;
+                    }
+
+                    if let Err(e) = proc.send_input(&input) {
+                        eprintln!("❌ Error sending input to Flutter: {}", e);
+                        break;
+                    }
+                }
+                _ => {} // Ignore other events
+            }
+        }
+
+        // Check if Flutter process is still running
+        let mut proc = process.lock().unwrap();
+        if !proc.is_running() {
+            break;
+        }
+        drop(proc); // Release lock
+    }
+
+    disable_raw_mode().context("Failed to disable raw mode")?;
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
 
@@ -184,6 +247,7 @@ fn main() -> Result<()> {
     let process_clone = Arc::clone(&process);
     ctrlc::set_handler(move || {
         println!("\n🛑 Received Ctrl+C, shutting down...");
+        let _ = disable_raw_mode();
         let mut proc = process_clone.lock().unwrap();
         let _ = proc.kill();
         std::process::exit(0);
@@ -193,8 +257,19 @@ fn main() -> Result<()> {
     // Wait a bit for Flutter to start up
     thread::sleep(Duration::from_secs(2));
 
+    // Start user input passthrough in a separate thread
+    let process_for_input = Arc::clone(&process);
+    let input_handle = thread::spawn(move || {
+        if let Err(e) = handle_user_input(process_for_input) {
+            eprintln!("❌ Input handler error: {}", e);
+        }
+    });
+
     // Start watching for file changes
     watch_files(args.path, process)?;
+
+    // Wait for input handler to finish
+    let _ = input_handle.join();
 
     println!("👋 Flutter Watcher stopped");
     Ok(())
