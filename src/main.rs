@@ -3,7 +3,7 @@ use clap::Parser;
 use crossterm::event::{self, Event as TermEvent, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::channel;
@@ -37,8 +37,8 @@ impl FlutterProcess {
         cmd.arg("run")
             .current_dir(path)
             .stdin(Stdio::piped())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit());
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
 
         if let Some(dev) = device {
             cmd.arg("-d").arg(dev);
@@ -103,7 +103,7 @@ fn watch_files(path: PathBuf, process: Arc<Mutex<FlutterProcess>>) -> Result<()>
         .context("Failed to watch directory")?;
 
     println!("👀 Watching for changes in: {}", path.display());
-    println!("💡 Tip: Press Ctrl+C to stop\n");
+    println!("💡 Tip: Press Ctrl+C to stop");
 
     let mut last_reload = std::time::Instant::now();
     let debounce_duration = Duration::from_millis(500);
@@ -160,6 +160,23 @@ fn should_trigger_reload(event: &Event) -> bool {
             .and_then(|ext| ext.to_str())
             .map(|ext| ext == "dart")
             .unwrap_or(false)
+    })
+}
+
+fn handle_output_stream<R: std::io::Read + Send + 'static>(
+    stream: R,
+    _is_stderr: bool,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let reader = BufReader::new(stream);
+        for line in reader.lines() {
+            match line {
+                Ok(line) => {
+                    println!("{}", line);
+                }
+                Err(_) => break,
+            }
+        }
     })
 }
 
@@ -240,8 +257,17 @@ fn main() -> Result<()> {
     println!("================\n");
 
     // Spawn Flutter process
-    let process = FlutterProcess::spawn(&args.path, args.device.as_ref(), &args.flutter_args)?;
+    let mut process = FlutterProcess::spawn(&args.path, args.device.as_ref(), &args.flutter_args)?;
+
+    // Take ownership of stdout and stderr for output handling
+    let stdout = process.child.stdout.take().context("Failed to capture stdout")?;
+    let stderr = process.child.stderr.take().context("Failed to capture stderr")?;
+
     let process = Arc::new(Mutex::new(process));
+
+    // Start output handling threads
+    let stdout_handle = handle_output_stream(stdout, false);
+    let stderr_handle = handle_output_stream(stderr, true);
 
     // Setup Ctrl+C handler
     let process_clone = Arc::clone(&process);
@@ -268,8 +294,10 @@ fn main() -> Result<()> {
     // Start watching for file changes
     watch_files(args.path, process)?;
 
-    // Wait for input handler to finish
+    // Wait for threads to finish
     let _ = input_handle.join();
+    let _ = stdout_handle.join();
+    let _ = stderr_handle.join();
 
     println!("👋 Flutter Watcher stopped");
     Ok(())
